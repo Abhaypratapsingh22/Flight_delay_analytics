@@ -1,0 +1,29 @@
+{
+    "best_model": "Logistic Regression",
+    "logistic_regression": {
+        "model": "Logistic Regression",
+        "accuracy": 0.7476027397260274,
+        "precision": 0.5222672064777328,
+        "recall": 0.08686868686868687,
+        "fpr": 0.027095292766934558,
+        "f1": 0.1489607390300231,
+        "auc": 0.6797115432936329,
+        "tp": 129,
+        "fp": 118,
+        "tn": 4237,
+        "fn": 1356
+    },
+    "decision_tree": {
+        "model": "Decision Tree Classifier",
+        "accuracy": 0.7470890410958904,
+        "precision": 0.5555555555555556,
+        "recall": 0.026936026936026935,
+        "fpr": 0.0073478760045924225,
+        "f1": 0.05138086062941554,
+        "auc": 0.6131051811648826,
+        "tp": 40,
+        "fp": 32,
+        "tn": 4323,
+        "fn": 1445
+    }
+}

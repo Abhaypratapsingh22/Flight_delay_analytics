@@ -1,0 +1,7 @@
+# Requirements for Aviation Network Delay Analytics & Classification
+# INT315: Cluster Computing Project
+
+pyspark>=3.5.0
+findspark>=2.0.1
+pandas>=2.0.0
+kafka-python>=2.0.0
