@@ -66,19 +66,18 @@ python src/delay_classifier.py
 1. Ingests flight logs and defines the target binary classification label:
    - **`label = 1.0` (Significant Delay)**: Average flight delay > 15 minutes.
    - **`label = 0.0` (On-Time / Minor Delay)**: Average flight delay <= 15 minutes.
-2. Applies **`StringIndexer`** to categorical columns `Carrier`, `Origin`, and `Dest`.
-3. Applies **`OneHotEncoder`** to convert index categories into binary sparse vectors.
-4. Uses **`VectorAssembler`** to combine categorical vectors and numerical attributes (`month`, `ArrFlights`) into a unified `features` vector.
-5. Performs an **80/20 train/test split**.
-6. Trains two binary classifiers:
+2. Applies **`StringIndexer`** to categorical columns `Carrier` and `Dest` (airport).
+3. Uses **`VectorAssembler`** to combine categorical indices and numerical attributes (`month`, `ArrFlights`) into a unified `features` vector.
+4. Performs an **80/20 train/test split**.
+5. Trains two binary classifiers:
    - **Logistic Regression Classifier**
-   - **Decision Tree Classifier**
-7. Generates full performance matrices:
+   - **Decision Tree Classifier (maxBins=500)**
+6. Generates full performance matrices:
    - ASCII Confusion Matrix (True Positives, False Positives, True Negatives, False Negatives).
    - False Positive Rate ($FPR = \frac{FP}{FP + TN}$).
    - Accuracy, Precision, Recall (TPR), F1-Score.
-   - Area Under ROC ($AUC$) using `BinaryClassificationEvaluator`.
-8. Saves the best model and summary JSON to `model/model_evaluation_summary.json`.
+   - Area Under ROC ($AUC$) using `BinaryClassificationEvaluator(rawPredictionCol="probability")`.
+7. Saves the best model and summary JSON to `model/model_evaluation_summary.json`.
 
 ---
 
@@ -144,15 +143,15 @@ Security Delays            :  0.17%  (TSA checkpoint and terminal breaches)
 
 ### 3.2 Unit VI: Machine Learning Classification Performance
 
-#### Confusion Matrices ($N_{test} = 5,840$ flights)
+#### Confusion Matrices ($N_{test} = 4,995$ flights)
 
 **1. Logistic Regression Classifier**:
 ```text
 +--------------------------+--------------------------+--------------------------+
 |                          | Predicted ON-TIME (0)    | Predicted DELAYED (1)    |
 +--------------------------+--------------------------+--------------------------+
-| Actual ON-TIME (0)       | TN = 4237                | FP = 118                 |
-| Actual DELAYED (1)       | FN = 1356                | TP = 129                 |
+| Actual ON-TIME (0)       | TN = 3751                | FP = 0                   |
+| Actual DELAYED (1)       | FN = 1244                | TP = 0                   |
 +--------------------------+--------------------------+--------------------------+
 ```
 
@@ -161,8 +160,8 @@ Security Delays            :  0.17%  (TSA checkpoint and terminal breaches)
 +--------------------------+--------------------------+--------------------------+
 |                          | Predicted ON-TIME (0)    | Predicted DELAYED (1)    |
 +--------------------------+--------------------------+--------------------------+
-| Actual ON-TIME (0)       | TN = 4323                | FP = 32                  |
-| Actual DELAYED (1)       | FN = 1445                | TP = 40                  |
+| Actual ON-TIME (0)       | TN = 3448                | FP = 303                 |
+| Actual DELAYED (1)       | FN = 922                 | TP = 322                 |
 +--------------------------+--------------------------+--------------------------+
 ```
 
@@ -170,12 +169,12 @@ Security Delays            :  0.17%  (TSA checkpoint and terminal breaches)
 
 | Evaluation Metric | Formula / Description | Logistic Regression | Decision Tree Classifier | Winner / Analysis |
 | :--- | :--- | :--- | :--- | :--- |
-| **Accuracy** | $\frac{TP + TN}{Total}$ | **74.76%** | 74.71% | **Logistic Regression** |
-| **Precision** | $\frac{TP}{TP + FP}$ | 52.23% | **55.56%** | **Decision Tree** |
-| **Recall (TPR)** | $\frac{TP}{TP + FN}$ | **8.69%** | 2.69% | **Logistic Regression** (3x better recall) |
-| **False Positive Rate (FPR)** | $\frac{FP}{FP + TN}$ | 2.71% | **0.73%** | **Decision Tree** (Lower false alarms) |
-| **F1-Score** | $2 \cdot \frac{Precision \cdot Recall}{Precision + Recall}$ | **0.1490** | 0.0514 | **Logistic Regression** |
-| **Area Under ROC (AUC)** | Measure of separability | **0.6797** | 0.6131 | **Logistic Regression** (+6.66% AUC) |
+| **Accuracy** | $\frac{TP + TN}{Total}$ | 75.10% | **75.48%** | **Decision Tree** (+0.38%) |
+| **Precision** | $\frac{TP}{TP + FP}$ | 0.00% | **51.52%** | **Decision Tree** |
+| **Recall (TPR)** | $\frac{TP}{TP + FN}$ | 0.00% | **25.88%** | **Decision Tree** (Detects 322 delayed flights) |
+| **False Positive Rate (FPR)** | $\frac{FP}{FP + TN}$ | **0.00%** | 8.08% | **Logistic Regression** (Zero false alarms) |
+| **F1-Score** | $2 \cdot \frac{Precision \cdot Recall}{Precision + Recall}$ | 0.0000 | **0.3446** | **Decision Tree** |
+| **Area Under ROC (AUC)** | Measure of separability | 0.5188 | **0.6536** | **Decision Tree** (+13.48% AUC) |
 
 ---
 
@@ -216,7 +215,7 @@ $$\text{Congestion Risk Score} = \frac{\text{InDegree} \times \text{AvgArrivalDe
 2. **Hub-and-Spoke Fragility**:
    The GraphX degree analysis demonstrates that Chicago O'Hare (`ORD`), Dallas/Fort Worth (`DFW`), and Atlanta (`ATL`) form the core nexus of the American aviation topology. Any localized capacity reduction at these three nodes directly impacts over 65% of domestic connecting routes.
 3. **MLlib Algorithm Efficacy**:
-   Logistic Regression outperformed the Decision Tree Classifier with an **AUC of 0.6797 vs 0.6131** and achieved a substantially higher True Positive detection rate (Recall of 8.69% vs 2.69%) while maintaining a very low False Positive Rate of **2.71%**, demonstrating superior reliability in classifying delay probabilities under class imbalance (74.4% on-time vs 25.6% delayed).
+   The **Decision Tree Classifier** outperformed Logistic Regression with an **AUC of 0.6536 vs 0.5188** and achieved a substantially higher True Positive detection rate (Recall of 25.88% vs 0.00%, correctly identifying 322 delayed flights) and **75.48% Accuracy**. Logistic Regression struggled under class imbalance (75.1% on-time vs 24.9% delayed) with raw categorical integer indices, defaulting to predicting the majority class (`0.0`), whereas the Decision Tree learned non-linear split rules on categorical airport and carrier features.
 
 ---
 

@@ -111,14 +111,14 @@ python src/kafka_stream_demo.py
 
 ### B. Machine Learning Performance (PySpark MLlib)
 
-| Performance Metric | Logistic Regression (Best) | Decision Tree Classifier |
+| Performance Metric | Logistic Regression | Decision Tree Classifier (Best) |
 | :--- | :--- | :--- |
-| **Accuracy** | **74.76%** | 74.71% |
-| **Precision** | 52.23% | **55.56%** |
-| **Recall (TPR)** | **8.69%** | 2.69% |
-| **False Positive Rate (FPR)** | 2.71% | **0.73%** |
-| **F1-Score** | **0.1490** | 0.0514 |
-| **Area Under ROC (AUC)** | **0.6797** | 0.6131 |
+| **Accuracy** | 75.10% | **75.48%** |
+| **Precision** | 0.00% | **51.52%** |
+| **Recall (TPR)** | 0.00% | **25.88%** (Detects 322 delayed flights) |
+| **False Positive Rate (FPR)** | **0.00%** | 8.08% |
+| **F1-Score** | 0.0000 | **0.3446** |
+| **Area Under ROC (AUC)** | 0.5188 | **0.6536** (+13.48% AUC) |
 
 ### C. Network Graph Analysis (GraphX / Graph Analytics)
 - **Top Connected Hubs (Total Degree)**:

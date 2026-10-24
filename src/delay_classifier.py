@@ -6,24 +6,25 @@ Course: INT315 - Cluster Computing
 ================================================================================
 Description:
     This script builds a machine learning pipeline using PySpark MLlib:
-    1. Preprocessing: Converts Carrier, Origin, and Destination into indexed
-       and one-hot encoded features using StringIndexer and OneHotEncoder.
-    2. Feature Assembly: Bundles all features into a single VectorAssembler vector.
+    1. Preprocessing: Converts Carrier and Airport into indexed features
+       using StringIndexer.
+    2. Feature Assembly: Bundles features into a single VectorAssembler vector.
     3. Binary Classification Target:
        - Delayed (1) : Average arrival delay > 15 minutes
        - On-time (0) : Average arrival delay <= 15 minutes
-    4. Model Training: Trains Logistic Regression and Decision Tree Classifier.
+    4. Model Training: Trains Logistic Regression and Decision Tree Classifier (maxBins=500).
     5. Evaluation & Performance Matrix:
        - Confusion Matrix (TP, FP, TN, FN)
        - False Positive Rate (FPR)
        - Accuracy, Precision, Recall, F1-Score
-       - Area Under ROC (AUC)
-    6. Model Persistence: Saves the trained model to disk in the 'model/' directory.
+       - Area Under ROC (AUC) evaluated on probability column
+    6. Model Persistence: Saves metrics to 'model/model_evaluation_summary.json'.
 ================================================================================
 """
 
 import os
 import sys
+import json
 
 # ------------------------------------------------------------------------------
 # STEP 1: INITIALIZE SPARK ENVIRONMENT
@@ -32,11 +33,11 @@ try:
     import findspark
     findspark.init()
 except Exception as e:
-    print(f"[INFO] findspark initialization: {e}")
+    pass
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, round, expr
-from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
+from pyspark.sql.functions import col, when
+from pyspark.ml.feature import StringIndexer, VectorAssembler
 from pyspark.ml.classification import LogisticRegression, DecisionTreeClassifier
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClassificationEvaluator
 
@@ -64,7 +65,7 @@ def prepare_data(spark, csv_path):
     """
     STEP 2: INGEST AND PREPROCESS DATA
     - Ingests flight logs
-    - Maps carrier primary hubs to establish Origin -> Destination routes
+    - Standardizes column names
     - Defines binary target label:
         1 = Significant delay (> 15 minutes)
         0 = On-time / Minor delay (<= 15 minutes)
@@ -94,23 +95,6 @@ def prepare_data(spark, csv_path):
                        .withColumnRenamed("arr_delay", "ArrDelay") \
                        .withColumnRenamed("arr_flights", "ArrFlights")
 
-    # Map Carrier Hubs to generate 'Origin' airport for each carrier
-    # (e.g. DL -> ATL, AA -> DFW, UA -> ORD, WN -> MDW, B6 -> JFK, AS -> SEA)
-    hub_mapping_sql = """
-        CASE 
-            WHEN Carrier IN ('AA', 'MQ') THEN 'DFW'
-            WHEN Carrier IN ('DL', '9E') THEN 'ATL'
-            WHEN Carrier IN ('UA') THEN 'ORD'
-            WHEN Carrier IN ('WN') THEN 'MDW'
-            WHEN Carrier IN ('B6') THEN 'JFK'
-            WHEN Carrier IN ('AS') THEN 'SEA'
-            WHEN Carrier IN ('F9') THEN 'DEN'
-            WHEN Carrier IN ('NK') THEN 'FLL'
-            ELSE 'ORD'
-        END
-    """
-    clean_df = clean_df.withColumn("Origin", expr(hub_mapping_sql))
-
     # Calculate average delay per flight
     clean_df = clean_df.withColumn("AvgDelay", col("ArrDelay") / col("ArrFlights"))
 
@@ -131,11 +115,9 @@ def prepare_data(spark, csv_path):
     print(f"    - On-Time   (label = 0) : {ontime_count:,} ({ontime_count / total_count * 100:.2f}%)")
     print(f"    - Delayed   (label = 1) : {delayed_count:,} ({delayed_count / total_count * 100:.2f}%)")
 
-    # For faster execution and stable training on standard laptops,
-    # sample 30,000 records if dataset is very large
-    if total_count > 30000:
-        print("\n[INFO] Sampling 30,000 records for fast, beginner-friendly model training...")
-        clean_df = clean_df.sample(withReplacement=False, fraction=30000.0 / total_count, seed=42)
+    # Sample 15% for fast, stable execution on standard laptops
+    print("\n[INFO] Sampling records (fraction=0.15, seed=42) for fast, beginner-friendly training...")
+    clean_df = clean_df.sample(withReplacement=False, fraction=0.15, seed=42)
 
     return clean_df
 
@@ -143,37 +125,28 @@ def prepare_data(spark, csv_path):
 def build_feature_pipeline(df):
     """
     STEP 3: CATEGORICAL ENCODING & VECTOR ASSEMBLER
-    Converts Carrier, Origin, and Destination into indexed and one-hot encoded
-    vectors using StringIndexer and OneHotEncoder, then combines with numerical features.
+    Converts Carrier and Destination airport into indexed numerical features
+    using StringIndexer, then bundles with numerical features into 'features'.
     """
     print("\n" + "="*80)
-    print("STEP 3: FEATURE ENGINEERING (StringIndexer + OneHotEncoder + VectorAssembler)")
+    print("STEP 3: FEATURE ENGINEERING (StringIndexer + VectorAssembler)")
     print("="*80)
 
-    # 1. StringIndexer: Assigns a unique integer index to each category
-    print("--> Applying StringIndexer to ['Carrier', 'Origin', 'Dest']...")
-    indexer = StringIndexer(
-        inputCols=["Carrier", "Origin", "Dest"],
-        outputCols=["Carrier_Index", "Origin_Index", "Dest_Index"],
-        handleInvalid="keep"
-    )
-    indexed_df = indexer.fit(df).transform(df)
+    # 1. StringIndexer
+    print("--> Applying StringIndexer to ['Carrier', 'Dest']...")
+    indexer1 = StringIndexer(inputCol="Carrier", outputCol="carrier_idx", handleInvalid="keep")
+    indexer2 = StringIndexer(inputCol="Dest", outputCol="airport_idx", handleInvalid="keep")
 
-    # 2. OneHotEncoder: Converts category indices into binary one-hot vectors
-    print("--> Applying OneHotEncoder to categorical index columns...")
-    encoder = OneHotEncoder(
-        inputCols=["Carrier_Index", "Origin_Index", "Dest_Index"],
-        outputCols=["Carrier_Vec", "Origin_Vec", "Dest_Vec"]
-    )
-    encoded_df = encoder.fit(indexed_df).transform(indexed_df)
+    df_indexed = indexer1.fit(df).transform(df)
+    df_indexed = indexer2.fit(df_indexed).transform(df_indexed)
 
-    # 3. VectorAssembler: Combines all feature columns into a single vector
-    print("--> Assembling all features into 'features' vector...")
+    # 2. VectorAssembler
+    print("--> Assembling features into 'features' vector...")
     assembler = VectorAssembler(
-        inputCols=["Carrier_Vec", "Origin_Vec", "Dest_Vec", "month", "ArrFlights"],
+        inputCols=["carrier_idx", "airport_idx", "month", "ArrFlights"],
         outputCol="features"
     )
-    final_df = assembler.transform(encoded_df).select("features", "label", "Carrier", "Dest")
+    final_df = assembler.transform(df_indexed).select("features", "label")
 
     return final_df
 
@@ -186,7 +159,7 @@ def evaluate_model(predictions, model_name):
     - False Positive Rate (FPR)
     - True Positive Rate (Recall)
     - Precision, Accuracy, F1-Score
-    - Area Under ROC (AUC)
+    - Area Under ROC (AUC) using probability column
     """
     print("\n" + "-"*80)
     print(f"PERFORMANCE EVALUATION: {model_name}")
@@ -199,22 +172,22 @@ def evaluate_model(predictions, model_name):
     fn = predictions.filter((col("prediction") == 0.0) & (col("label") == 1.0)).count()
     total = tp + fp + tn + fn
 
-    # 2. Compute Metrics using Beginner Formulas
+    # 2. Compute Metrics
     accuracy = (tp + tn) / total if total > 0 else 0.0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
 
-    # 3. Compute AUC using PySpark BinaryClassificationEvaluator
+    # 3. Compute AUC using probability column for positive class ranking
     roc_evaluator = BinaryClassificationEvaluator(
-        rawPredictionCol="rawPrediction",
+        rawPredictionCol="probability",
         labelCol="label",
         metricName="areaUnderROC"
     )
     auc = roc_evaluator.evaluate(predictions)
 
-    # 4. Display Confusion Matrix in Beginner-Readable Table (ASCII compatible)
+    # 4. Display Confusion Matrix
     print("\n[CONFUSION MATRIX]")
     print("+--------------------------+--------------------------+--------------------------+")
     print("|                          | Predicted ON-TIME (0)    | Predicted DELAYED (1)    |")
@@ -265,8 +238,7 @@ def train_and_evaluate_models(data_df, model_save_dir):
     lr = LogisticRegression(
         featuresCol="features",
         labelCol="label",
-        maxIter=20,
-        regParam=0.01
+        maxIter=10
     )
     lr_model = lr.fit(train_data)
     lr_preds = lr_model.transform(test_data)
@@ -275,11 +247,12 @@ def train_and_evaluate_models(data_df, model_save_dir):
     # --------------------------------------------------------------------------
     # MODEL 2: DECISION TREE CLASSIFIER
     # --------------------------------------------------------------------------
-    print("\n[Training Model 2]: Decision Tree Classifier...")
+    print("\n[Training Model 2]: Decision Tree Classifier (maxBins=500)...")
     dt = DecisionTreeClassifier(
         featuresCol="features",
         labelCol="label",
         maxDepth=5,
+        maxBins=500,
         seed=42
     )
     dt_model = dt.fit(train_data)
@@ -305,14 +278,13 @@ def train_and_evaluate_models(data_df, model_save_dir):
     # --------------------------------------------------------------------------
     # SAVE BEST MODEL & SUMMARY METRICS
     # --------------------------------------------------------------------------
-    best_model_name = "Decision Tree" if dt_metrics["auc"] > lr_metrics["auc"] else "Logistic Regression"
-    best_model = dt_model if best_model_name == "Decision Tree" else lr_model
+    best_model_name = "Decision Tree Classifier" if dt_metrics["auc"] > lr_metrics["auc"] else "Logistic Regression"
+    best_model = dt_model if best_model_name == "Decision Tree Classifier" else lr_model
     save_path = os.path.join(model_save_dir, "best_flight_delay_model")
 
     print(f"\n--> Best model based on AUC is: {best_model_name}")
-    
+
     # 1. Save standard JSON summary of the model evaluation to disk
-    import json
     summary_file = os.path.join(model_save_dir, "model_evaluation_summary.json")
     summary_data = {
         "best_model": best_model_name,
@@ -352,7 +324,7 @@ def main():
         # 2. Ingest and Clean
         clean_df = prepare_data(spark, dataset_path)
 
-        # 3. StringIndexer + OneHotEncoder + VectorAssembler
+        # 3. StringIndexer + VectorAssembler
         final_df = build_feature_pipeline(clean_df)
 
         # 4. Train Models & Evaluate (Confusion Matrix, FPR, AUC)
