@@ -68,12 +68,14 @@ Isolates carrier bottlenecks and top congested airports using Spark SQL and Data
 ```bash
 python src/eda_sql.py
 ```
+> 📖 Detailed Step-by-Step & CMD Guide: **[sql_cmd_execution.md](file:///d:/Project-14-aug-onwards/flight_delay_analytics/sql_cmd_execution.md)**
 
 ### Step 2: Machine Learning Binary Classification (Unit VI)
-Executes feature indexing, one-hot encoding, vector assembly, model training (Logistic Regression vs. Decision Tree), confusion matrix computation, and AUC evaluation:
+Executes feature indexing, vector assembly, model training (Logistic Regression vs. Decision Tree), confusion matrix computation, and AUC evaluation:
 ```bash
 python src/delay_classifier.py
 ```
+> 📖 Detailed Step-by-Step & CMD Guide: **[cmd_execution.md](file:///d:/Project-14-aug-onwards/flight_delay_analytics/cmd_execution.md)**
 
 ### Step 3: Graph Network & Congestion Hub Analytics (Unit III)
 Models airports as vertices and flight routes as directed edges. Computes In-Degrees, Out-Degrees, and Congestion Risk Scores:
