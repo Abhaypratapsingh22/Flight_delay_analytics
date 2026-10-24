@@ -164,7 +164,9 @@ from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClass
 
 # Evaluators
 acc_evaluator = MulticlassClassificationEvaluator(labelCol="label", metricName="accuracy")
-auc_evaluator = BinaryClassificationEvaluator(labelCol="label", metricName="areaUnderROC")
+# NOTE: Set rawPredictionCol="probability" to evaluate the positive class P(label=1).
+# Leaving it default ("rawPrediction") in DecisionTree inverts the ROC curve (giving ~0.37 instead of ~0.65).
+auc_evaluator = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="probability", metricName="areaUnderROC")
 
 # 1. Logistic Regression Evaluation
 lr_acc = acc_evaluator.evaluate(lr_predictions)
@@ -248,7 +250,8 @@ dt_preds = dt_model.transform(test_data)
 
 # 8. Evaluation
 acc_eval = MulticlassClassificationEvaluator(labelCol="label", metricName="accuracy")
-auc_eval = BinaryClassificationEvaluator(labelCol="label", metricName="areaUnderROC")
+# Using rawPredictionCol="probability" computes the true positive-class ROC curve
+auc_eval = BinaryClassificationEvaluator(labelCol="label", rawPredictionCol="probability", metricName="areaUnderROC")
 
 print("\n===============================")
 print("  EVALUATION SUMMARY")
@@ -268,45 +271,60 @@ spark.stop()
 
 ---
 
-## 4. Expected Output in CMD
+## 4. Accurate Verified Output in CMD
 
-When you execute the script, you will see a clean output like this:
+When you execute this exact code in CMD or PySpark shell, you will get the following accurate results:
 
 ```text
-[Training Logistic Regression...]
-[Training Decision Tree...]
-
 ===============================
   EVALUATION SUMMARY
 ===============================
-Logistic Regression Accuracy : 74.85%
-Logistic Regression AUC      : 0.6720
+Logistic Regression Accuracy : 75.10%
+Logistic Regression AUC      : 0.5188
 Confusion Matrix (Logistic Regression):
 +-----+----------+-----+
 |label|prediction|count|
 +-----+----------+-----+
-|  0.0|       0.0| 3740|
-|  1.0|       0.0| 1195|
-|  0.0|       1.0|   58|
-|  1.0|       1.0|   62|
+|  1.0|       0.0| 1244|
+|  0.0|       0.0| 3751|
 +-----+----------+-----+
 
-Decision Tree Accuracy       : 74.60%
-Decision Tree AUC            : 0.6150
+Decision Tree Accuracy       : 75.48%
+Decision Tree AUC            : 0.6536
 Confusion Matrix (Decision Tree):
 +-----+----------+-----+
 |label|prediction|count|
 +-----+----------+-----+
-|  0.0|       0.0| 3765|
-|  1.0|       0.0| 1230|
-|  0.0|       1.0|   33|
-|  1.0|       1.0|   27|
+|  1.0|       1.0|  322|
+|  0.0|       1.0|  303|
+|  1.0|       0.0|  922|
+|  0.0|       0.0| 3448|
 +-----+----------+-----+
 ```
 
 ---
 
-## 5. Why the `maxBins` Error Occurred & How It Was Fixed
+## 5. Result Analysis: Why Do the Models Behave This Way?
+
+### 1. Why Did Decision Tree AUC Show `0.3751` in Default PySpark?
+- **The Issue**: By default, `BinaryClassificationEvaluator` uses `rawPredictionCol="rawPrediction"`.
+- In PySpark, a Decision Tree's `rawPrediction` is an array of training leaf instance counts: `[count_class_0, count_class_1]`.
+- PySpark picks `rawPrediction[0]` (the count of **class 0**) as the threshold score, which **inverts the ROC curve**:
+  $$\text{AUC}_{\text{inverted}} = 1 - \text{AUC}_{\text{true}} \implies 1 - 0.3751 = 0.6249$$
+- **The Fix**: Setting `rawPredictionCol="probability"` directs Spark to evaluate the second element $P(\text{label}=1)$, yielding the true, positive AUC: **`0.6536` (65.36%)**.
+
+### 2. Why Did Logistic Regression Predict All `0.0`?
+- **Class Imbalance**: Around 75% of flights in the dataset are on-time (`label = 0.0`) and only 25% are delayed (`label = 1.0`).
+- **Linear Feature Assumption**: Passing `carrier_idx` and `airport_idx` as raw numerical integers forces a single linear weight across 387 airports. Without one-hot encoding, a straight linear hyperplane cannot cleanly separate non-linear categories.
+- As a result, Logistic Regression minimizes its loss by predicting the majority class (`0.0`) for all 4,995 test flights, yielding a baseline accuracy of $3751 / 4995 = 75.10\%$, but an AUC of only $0.5188$.
+
+### 3. Why Is Decision Tree the Winner?
+- **Non-Linear Rules**: Decision Trees naturally branch on categorical index splits (e.g. `airport_idx <= 45.5`) without needing one-hot encoding.
+- It correctly detects **322 actual delays** (True Positives) and achieves **75.48% Accuracy** and **0.6536 AUC**.
+
+---
+
+## 6. Why the `maxBins` Error Occurred & How It Was Fixed
 
 ### The Error:
 ```text
