@@ -141,7 +141,8 @@ lr_predictions.select("label", "prediction", "probability").show(5)
 from pyspark.ml.classification import DecisionTreeClassifier
 
 # 1. Create model
-dt = DecisionTreeClassifier(featuresCol="features", labelCol="label", maxDepth=5)
+# NOTE: Set maxBins=500 because 'airport' has 387 distinct categories (Spark default is 32)
+dt = DecisionTreeClassifier(featuresCol="features", labelCol="label", maxDepth=5, maxBins=500)
 
 # 2. Train model
 dt_model = dt.fit(train_data)
@@ -152,6 +153,7 @@ dt_predictions = dt_model.transform(test_data)
 # Show predictions
 dt_predictions.select("label", "prediction", "probability").show(5)
 ```
+
 
 ---
 
@@ -238,9 +240,9 @@ lr = LogisticRegression(featuresCol="features", labelCol="label", maxIter=10)
 lr_model = lr.fit(train_data)
 lr_preds = lr_model.transform(test_data)
 
-# 7. Model 2: Decision Tree
+# 7. Model 2: Decision Tree (maxBins=500 handles 387 airport categories)
 print("[Training Decision Tree...]")
-dt = DecisionTreeClassifier(featuresCol="features", labelCol="label", maxDepth=5)
+dt = DecisionTreeClassifier(featuresCol="features", labelCol="label", maxDepth=5, maxBins=500)
 dt_model = dt.fit(train_data)
 dt_preds = dt_model.transform(test_data)
 
@@ -301,3 +303,27 @@ Confusion Matrix (Decision Tree):
 |  1.0|       1.0|   27|
 +-----+----------+-----+
 ```
+
+---
+
+## 5. Why the `maxBins` Error Occurred & How It Was Fixed
+
+### The Error:
+```text
+java.lang.IllegalArgumentException: requirement failed: DecisionTree requires maxBins (= 32)
+to be at least as large as the number of values in each categorical feature, but categorical
+feature 1 has 387 values.
+```
+
+### Why it happened:
+- PySpark's `DecisionTreeClassifier` has a default parameter `maxBins = 32`.
+- Our dataset has **387 distinct airports**, so the categorical `airport_idx` feature has 387 values.
+- Spark requires: `maxBins >= number of distinct categories` in any feature. Since `387 > 32`, Spark rejected the training.
+
+### The Fix:
+Add `maxBins=500` when defining the `DecisionTreeClassifier`:
+```python
+dt = DecisionTreeClassifier(featuresCol="features", labelCol="label", maxDepth=5, maxBins=500)
+```
+Setting `maxBins=500` satisfies `500 >= 387` and trains the model immediately without error.
+
